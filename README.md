@@ -46,6 +46,7 @@ This project implements people detection and tracking using DeepSORT and YOLO mo
 ## References
 - [YOLO: You Only Look Once](https://pjreddie.com/darknet/yolo/)
 - [DeepSORT: Simple Online and Realtime Tracking](https://github.com/nwojke/deep_sort)
+- [Yolov8 object detection + deep sort object tracking](https://www.youtube.com/watch?v=jIRRuGN0j5E&list=PLb49csYFtO2HGELdc-RLRCNVNy0g2UMwc&index=1)
 
 ## License
 See `deep_sort/LICENSE` for license details.
