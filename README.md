@@ -60,13 +60,13 @@ Quick start
 
 1. Create a virtual environment and install dependencies:
 
-  python -m venv .venv
-  source .venv/bin/activate
-  pip install -r requirements.txt
+-  `python -m venv .venv`
+-  `source .venv/bin/activate`
+-  `pip install -r requirements.txt`
 
 2. Run the webapp:
 
-  python webapp.py
+-  `python webapp.py`
 
 3. Open http://localhost:5000 in your browser. Upload a video, the original will appear on the left and the right will show processing progress and the processed video when ready.
 
@@ -79,8 +79,8 @@ Committing demo files
 
 This repository ignores generated uploads and processed outputs by default. To include the two demo processed videos in the repository (so demos show immediately), place the processed files at:
 
-  processed/proc_people.mp4
-  processed/proc_people2.mp4
+-  `processed/proc_people.mp4`
+-  `processed/proc_people2.mp4`
 
 These two files are explicitly whitelisted in `.gitignore` so they will be included when you commit. All other files under `processed/` will be ignored.
 
