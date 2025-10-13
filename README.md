@@ -35,58 +35,67 @@ This project implements people detection and tracking using DeepSORT and YOLO mo
 ## Usage
 1. Place your input video in the `data/` directory.
 2. Run `main.py` to process the video and generate output:
-   ```bash
-   python main.py
-   ```
-3. Output video will be saved as `out.mp4`.
+  # Object Detection + DeepSORT Webapp
 
-## Evaluation
-- Use `deep_sort/evaluate_motchallenge.py` to evaluate tracking performance on MOTChallenge datasets.
+  Small project that runs YOLO object detection and DeepSORT tracking on video files and provides a minimal Flask webapp to upload videos, watch processing progress, and view processed results.
 
-## References
-- [YOLO: You Only Look Once](https://pjreddie.com/darknet/yolo/)
-- [DeepSORT: Simple Online and Realtime Tracking](https://github.com/nwojke/deep_sort)
-- [Yolov8 object detection + deep sort object tracking](https://www.youtube.com/watch?v=jIRRuGN0j5E&list=PLb49csYFtO2HGELdc-RLRCNVNy0g2UMwc&index=1)
+  Contents
+  - `webapp.py` — Flask + Flask-SocketIO webapp (upload, processing, progress, demos).
+  - `main.py` — simple example processor that runs detection + tracking over a video file.
+  - `tracker.py` — wrapper around DeepSORT tracker and encoder.
+  - `data/` — source videos used for demos and examples.
+  - `processed/` — processed output videos (ignored by default, two demo outputs may be whitelisted).
+  - `uploads/` — uploaded user videos (ignored by git).
+  - `deep_sort/` — DeepSORT library and utilities.
+  - `model_data/` — model data used by DeepSORT.
 
-## License
-See `deep_sort/LICENSE` for license details.
+  Quick start (development)
+  1. Create and activate a virtual environment:
 
-Webapp
-------
+  ```bash
+  python3 -m venv .venv
+  source .venv/bin/activate
+  ```
 
-This repository includes a simple Flask webapp to upload a video, process it with the YOLO+Tracker pipeline, and display progress and the resulting tracked video.
+  2. Install dependencies:
 
-Quick start
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-1. Create a virtual environment and install dependencies:
+  3. Run the webapp:
 
--  `python -m venv .venv`
--  `source .venv/bin/activate`
--  `pip install -r requirements.txt`
+  ```bash
+  python webapp.py
+  ```
 
-2. Run the webapp:
+  4. Open http://localhost:5000
 
--  `python webapp.py`
+  Webapp behavior
+  - Upload a video from the main page. The original video appears on the left. The right side shows processing progress and serves the processed (tracked) video when ready.
+  - The server processes uploads in a background thread and emits progress updates over Socket.IO.
 
-3. Open http://localhost:5000 in your browser. Upload a video, the original will appear on the left and the right will show processing progress and the processed video when ready.
+  Demos
+  - Visit `/demos` to see pre-generated demo pairs (original / processed). If the processed demo files don't exist they will be generated in the background and placed under `processed/`.
+  - The repository ignores generated processed files by default but two demo processed files can be whitelisted and committed:
+    - `processed/proc_people.mp4`
+    - `processed/proc_people2.mp4`
 
-Notes
-- The webapp uses the `yolov8n.pt` model in the repo root by default. Ensure it's present and that required ML dependencies (torch) are installed.
-- Processing runs on CPU by default (model(..., device='cpu')).
+  Auto-cleanup
+  - The webapp includes a background cleanup task that deletes files inside `uploads/` and `processed/` older than 1 hour. Whitelisted demo files are preserved.
+  - This runs inside the webapp process and requires no external cloud resources.
 
-Committing demo files
---------------------
+  Packaging & scripts
+  - `pyproject.toml` and `Makefile` are provided for packaging and convenience.
+  - Use `make install` to create venv and install dependencies; `make run` runs the app.
 
-This repository ignores generated uploads and processed outputs by default. To include the two demo processed videos in the repository (so demos show immediately), place the processed files at:
+  Notes & troubleshooting
+  - The app tries to use `yolov10n.pt` if present and falls back to `yolov8n.pt`.
+  - Processing runs on CPU by default; GPU support requires installing the appropriate PyTorch build.
+  - If browsers report "no video with supported format", ensure the processed files are valid MP4 files and that the server serves them with `video/mp4` Content-Type (the app uses Flask's `send_from_directory` with conditional responses to support range requests).
 
--  `processed/proc_people.mp4`
--  `processed/proc_people2.mp4`
+  Contributing
+  - Please avoid committing large processed videos except the two demo files above. Add other demo files to the whitelist if you want to include them.
 
-These two files are explicitly whitelisted in `.gitignore` so they will be included when you commit. All other files under `processed/` will be ignored.
-
-Auto-expire for uploads and processed files
------------------------------------------
-
-The webapp runs a lightweight background cleanup worker that deletes files in `uploads/` and `processed/` that are older than 1 hour. The two whitelisted demo files in `processed/` are preserved.
-
-This is implemented in `webapp.py` (function `cleanup_old_files`) and runs without external cloud services. If you want different TTL or interval, edit the parameters in the `start_background_workers` function.
+  License
+  See `deep_sort/LICENSE` for license details.
