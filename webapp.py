@@ -27,6 +27,55 @@ DEMO_ORIGINALS = [
     os.path.join(BASE_DIR, 'data', 'people2.mp4'),
 ]
 
+# Files in processed/ that we must preserve (whitelisted demos)
+WHITELISTED_PROCESSED = {
+    'proc_people.mp4',
+    'proc_people2.mp4',
+}
+
+
+def cleanup_old_files(interval_seconds=3000, expire_seconds=3600):
+    """Background cleanup: remove files in uploads/ and processed/ older than expire_seconds.
+
+    - Runs every interval_seconds seconds
+    - Preserves files listed in WHITELISTED_PROCESSED
+    """
+    app.logger.info('Started cleanup thread: interval=%s expire=%s', interval_seconds, expire_seconds)
+    while True:
+        try:
+            now = time.time()
+            # uploads
+            for fname in os.listdir(UPLOAD_DIR):
+                path = os.path.join(UPLOAD_DIR, fname)
+                try:
+                    if os.path.isfile(path) and (now - os.path.getmtime(path) > expire_seconds):
+                        app.logger.info('Removing old upload %s', path)
+                        os.remove(path)
+                except Exception:
+                    pass
+
+            # processed
+            for fname in os.listdir(OUT_DIR):
+                if fname in WHITELISTED_PROCESSED:
+                    continue
+                path = os.path.join(OUT_DIR, fname)
+                try:
+                    if os.path.isfile(path) and (now - os.path.getmtime(path) > expire_seconds):
+                        app.logger.info('Removing old processed %s', path)
+                        os.remove(path)
+                except Exception:
+                    pass
+        except Exception as e:
+            app.logger.error('Error during cleanup: %s', e)
+        time.sleep(interval_seconds)
+
+
+# Start the cleanup thread when the app starts
+@app.before_first_request
+def start_background_workers():
+    # cleanup thread: check every 50 minutes, expire after 1 hour
+    socketio.start_background_task(cleanup_old_files, 3000, 3600)
+
 
 def ensure_demo_processed(original_path):
     """Ensure the processed version of original_path exists under OUT_DIR.

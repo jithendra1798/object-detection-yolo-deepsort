@@ -83,3 +83,10 @@ This repository ignores generated uploads and processed outputs by default. To i
   processed/proc_people2.mp4
 
 These two files are explicitly whitelisted in `.gitignore` so they will be included when you commit. All other files under `processed/` will be ignored.
+
+Auto-expire for uploads and processed files
+-----------------------------------------
+
+The webapp runs a lightweight background cleanup worker that deletes files in `uploads/` and `processed/` that are older than 1 hour. The two whitelisted demo files in `processed/` are preserved.
+
+This is implemented in `webapp.py` (function `cleanup_old_files`) and runs without external cloud services. If you want different TTL or interval, edit the parameters in the `start_background_workers` function.
