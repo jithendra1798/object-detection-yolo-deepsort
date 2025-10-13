@@ -5,8 +5,8 @@ from tracker import Tracker
 import random
 
 
-video_inp_path = os.path.join('.', 'data', 'people.mp4')
-video_out_path = os.path.join('.', 'out.mp4')
+video_inp_path = os.path.join('.', 'data', 'people2.mp4')
+video_out_path = os.path.join('.', 'out2.mp4')
 
 cap = cv2.VideoCapture(video_inp_path)
 

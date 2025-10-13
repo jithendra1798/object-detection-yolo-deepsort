@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "object-detection-yolo-deepsort"
+version = "0.1.0"
+description = "Webapp to run YOLO + DeepSORT tracking on uploaded videos"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [ { name = "project" } ]
+license = { file = "deep_sort/LICENSE" }
+
+dependencies = [
+    "flask>=2.0",
+    "flask-socketio>=5.0",
+    "eventlet",
+    "opencv-python",
+    "ultralytics",
+    "torch",
+    "numpy",
+]
+
+[project.scripts]
+object-tracker-webapp = "webapp:main"

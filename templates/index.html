@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Object Tracking Webapp</title>
+    <style>
+      body { font-family: sans-serif; margin: 16px }
+      .container { display:flex; gap:16px }
+      .half { flex:1; border:1px solid #ddd; padding:8px }
+      video { width:100%; height:auto; background:#000 }
+      #progressBar { width:100%; height:20px; background:#eee; border-radius:4px; overflow:hidden }
+      #progressBar > i { display:block; height:100%; background:#4caf50; width:0% }
+    </style>
+  </head>
+  <body>
+    <h2>Upload video for object tracking</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="videoInput" type="file" accept="video/*" />
+      <button id="uploadBtn">Upload & Process</button>
+      <a href="/demos" style="padding:8px 12px;background:#2196F3;color:#fff;border-radius:6px;text-decoration:none;">View demos</a>
+    </div>
+    <p id="status"></p>
+    <h3>Processing</h3>
+    <div id="progressBar"><i></i></div>
+    <p id="percent">0%</p>
+
+    <div class="container">
+      <div class="half">
+        <h3>Original</h3>
+        <video id="originalVideo" controls></video>
+      </div>
+      <div class="half">
+        <h4>Result</h4>
+        <video id="processedVideo" controls></video>
+      </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>
