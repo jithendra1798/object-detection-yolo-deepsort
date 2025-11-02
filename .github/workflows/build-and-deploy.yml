@@ -1,0 +1,71 @@
+name: Build and deploy to Azure App Service
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: "3.10"
+  ACR_REPO: ${{ secrets.ACR_REPO || 'object-tracker' }}
+  IMAGE_TAG: ${{ secrets.IMAGE_TAG || 'latest' }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set ACR credential outputs
+        id: acr
+        run: |
+          ACR_USER=$(az acr credential show --name ${{ secrets.ACR_LOGIN_SERVER }} --query username -o tsv)
+          ACR_PASS=$(az acr credential show --name ${{ secrets.ACR_LOGIN_SERVER }} --query passwords[0].value -o tsv)
+          echo "user=$ACR_USER" >> $GITHUB_OUTPUT
+          echo "password=$ACR_PASS" >> $GITHUB_OUTPUT
+
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}.azurecr.io
+          username: ${{ steps.acr.outputs.user }}
+          password: ${{ steps.acr.outputs.password }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.ACR_LOGIN_SERVER }}.azurecr.io/${{ env.ACR_REPO }}:${{ env.IMAGE_TAG }}
+
+      - name: Configure container on App Service
+        run: |
+          az webapp config container set \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --container-image-name ${{ secrets.ACR_LOGIN_SERVER }}.azurecr.io/${{ env.ACR_REPO }}:${{ env.IMAGE_TAG }} \
+            --container-registry-url https://${{ secrets.ACR_LOGIN_SERVER }}.azurecr.io \
+            --container-registry-user ${{ steps.acr.outputs.user }} \
+            --container-registry-password ${{ steps.acr.outputs.password }}
+
+          az webapp config appsettings set \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --settings WEBSITES_PORT=5000 WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
+
+          az webapp config set \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --always-on true \
+            --web-sockets-enabled true
+
+          az webapp restart \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }}
