@@ -89,6 +89,24 @@ This project implements people detection and tracking using DeepSORT and YOLO mo
   - `pyproject.toml` and `Makefile` are provided for packaging and convenience.
   - Use `make install` to create venv and install dependencies; `make run` runs the app.
 
+  Local Docker testing & CI
+  - Use the included Makefile targets to build and run the container locally:
+
+  ```bash
+  make docker-build
+  make docker-run
+  # or use the helper script
+  ./scripts/test_docker.sh
+  ```
+
+  - CI workflow: `.github/workflows/ci-deploy.yml` will build/push the image to ACR and deploy to App Service when you push to `main`.
+
+  Required GitHub secrets for CI (set these in your repository settings):
+  - `ACR_LOGIN_SERVER` (e.g. myacrname.azurecr.io)
+  - `ACR_USERNAME`
+  - `ACR_PASSWORD`
+  - `AZURE_WEBAPP_NAME`
+
   Notes & troubleshooting
   - The app tries to use `yolov10n.pt` if present and falls back to `yolov8n.pt`.
   - Processing runs on CPU by default; GPU support requires installing the appropriate PyTorch build.
@@ -99,3 +117,100 @@ This project implements people detection and tracking using DeepSORT and YOLO mo
 
   License
   See `deep_sort/LICENSE` for license details.
+
+  ## Azure deployment (Docker + App Service)
+
+  You can deploy this webapp to Microsoft Azure using a container image. The recommended flow is:
+
+  1. Build a production Docker image locally (or via CI).
+  2. Push the image to Azure Container Registry (ACR).
+  3. Create an Azure App Service (Web App for Containers) and point it to the ACR image.
+
+  Below are concise, copy-pasteable steps.
+
+  1) Prepare a production Dockerfile
+
+  - Use a slim Python base, install system deps required by OpenCV/ffmpeg and your model runtime, install `requirements.txt`, and run Gunicorn + eventlet for Flask-SocketIO. Your local `Dockerfile` may already be present; if not, use the example below as a starting point.
+
+  ```dockerfile
+  FROM python:3.10-slim
+  ENV DEBIAN_FRONTEND=noninteractive
+  RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ffmpeg libsm6 libxext6 libgl1 git ca-certificates \
+      && rm -rf /var/lib/apt/lists/*
+  WORKDIR /app
+  COPY requirements.txt ./
+  RUN pip install --upgrade pip && pip install -r requirements.txt
+  COPY . /app
+  RUN mkdir -p uploads processed
+  EXPOSE 5000
+  # Use gunicorn with eventlet for Socket.IO
+  CMD ["gunicorn", "-k", "eventlet", "-w", "1", "webapp:app", "--bind", "0.0.0.0:5000"]
+  ```
+
+  2) Build and test locally
+
+  ```bash
+  docker build -t object-tracker:latest .
+  docker run --rm -p 5000:5000 -v $(pwd)/uploads:/app/uploads -v $(pwd)/processed:/app/processed object-tracker:latest
+  # then open http://localhost:5000
+  ```
+
+  3) Push image to Azure Container Registry (ACR)
+
+  ```bash
+  # login to Azure
+  az login
+  az group create -n myResourceGroup -l eastus
+  az acr create -n myacrname -g myResourceGroup --sku Basic --admin-enabled true
+  az acr login -n myacrname
+  docker tag object-tracker:latest myacrname.azurecr.io/object-tracker:latest
+  docker push myacrname.azurecr.io/object-tracker:latest
+  ```
+
+  4) Create App Service (Linux) and point to the ACR image
+
+  ```bash
+  az appservice plan create -g myResourceGroup -n myPlan --is-linux --sku B1
+  az webapp create -g myResourceGroup -p myPlan -n my-webapp-name \
+    --deployment-container-image-name myacrname.azurecr.io/object-tracker:latest
+
+  # Configure container registry credentials (if needed)
+  ACR_LOGIN_SERVER=$(az acr show -n myacrname -g myResourceGroup --query loginServer -o tsv)
+  ACR_USERNAME=$(az acr credential show -n myacrname -g myResourceGroup --query username -o tsv)
+  ACR_PASSWORD=$(az acr credential show -n myacrname -g myResourceGroup --query passwords[0].value -o tsv)
+  az webapp config container set -g myResourceGroup -n my-webapp-name \
+    --docker-custom-image-name ${ACR_LOGIN_SERVER}/object-tracker:latest \
+    --docker-registry-server-url https://${ACR_LOGIN_SERVER} \
+    --docker-registry-server-user $ACR_USERNAME \
+    --docker-registry-server-password $ACR_PASSWORD
+  ```
+
+  5) Enable WebSockets (required for Socket.IO)
+
+  ```bash
+  az webapp update -g myResourceGroup -n my-webapp-name --set clientAffinityEnabled=false
+  az webapp config set -g myResourceGroup -n my-webapp-name --generic-configurations '{"webSockets":{"enabled":true}}'
+  ```
+
+  6) Persistent storage (optional)
+
+  - App Service local filesystem is ephemeral. For persistent uploads/processed data either mount an Azure File share or change the app to use Azure Blob Storage for uploads/outputs.
+  - To mount Azure Files into App Service: create a Storage Account + File Share, then in the App Service -> "Configuration" -> "Path mappings" add a storage mount and map it to `/app/uploads` and `/app/processed`.
+
+  7) GPU inference (if needed)
+
+  - App Service does not provide GPU instances. For GPU-based inference deploy to an Azure VM with GPU (NC-series) or use AKS with GPU node pools.
+
+  8) CI/CD (recommended)
+
+  - Use GitHub Actions to build & push the image to ACR and then deploy (or call `az webapp` to update). Typical steps:
+    - actions/checkout
+    - docker/build-push-action
+    - azure/webapps-deploy or az cli
+
+  Notes
+  - Ensure `requirements.txt` pins compatible `torch`/`ultralytics` versions for the target environment.
+  - Use `gunicorn` + `eventlet` worker for Socket.IO in production.
+  - For multi-instance scaling, move uploads/processed to shared storage (Azure Files/Blob) or use a database/message queue to coordinate processing.
+

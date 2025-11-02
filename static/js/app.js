@@ -9,58 +9,137 @@ const progressBar = document.querySelector('#progressBar > i');
 const percentText = document.getElementById('percent');
 
 let uploadedFilename = null;
+let processingUrl = null;
+let originalPreviewUrl = null;
+
+const MAX_PROCESSED_RETRIES = 20;
+const RETRY_DELAY_MS = 1500;
+
+function resetProgress() {
+  progressBar.style.width = '0%';
+  percentText.innerText = '0%';
+}
+
+function disableUiWhileProcessing(disabled) {
+  uploadBtn.disabled = disabled;
+  videoInput.disabled = disabled;
+}
+
+function showOriginalPreview(file, serverUrl) {
+  if (originalPreviewUrl) {
+    URL.revokeObjectURL(originalPreviewUrl);
+    originalPreviewUrl = null;
+  }
+
+  if (file) {
+    originalPreviewUrl = URL.createObjectURL(file);
+    originalVideo.src = originalPreviewUrl;
+  } else if (serverUrl) {
+    originalVideo.src = `${serverUrl}${serverUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  }
+
+  originalVideo.load();
+  originalVideo.onloadeddata = () => {
+    // Attempt to show the first frame; autoplay may be blocked so ignore failures.
+    originalVideo.play().catch(() => {});
+  };
+}
+
+function loadProcessedVideo(url, attempt = 0) {
+  const targetUrl = url || processingUrl;
+  if (!targetUrl) {
+    status.innerText = 'Processed file not yet available; retrying...';
+    return;
+  }
+
+  const cacheBustedUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  processedVideo.onerror = null;
+  processedVideo.onloadeddata = null;
+  processedVideo.src = cacheBustedUrl;
+  processedVideo.load();
+
+  processedVideo.onloadeddata = () => {
+    status.innerText = 'Processing done';
+    disableUiWhileProcessing(false);
+    processedVideo.play().catch(() => {});
+  };
+
+  processedVideo.onerror = () => {
+    if (attempt + 1 >= MAX_PROCESSED_RETRIES) {
+      status.innerText = 'Processed file not yet available; please try again later.';
+      disableUiWhileProcessing(false);
+      return;
+    }
+    setTimeout(() => loadProcessedVideo(targetUrl, attempt + 1), RETRY_DELAY_MS);
+  };
+}
 
 uploadBtn.addEventListener('click', async () => {
   if (!videoInput.files || videoInput.files.length === 0) {
     alert('Choose a video first');
     return;
   }
+
   const file = videoInput.files[0];
   const form = new FormData();
   form.append('video', file);
+
   status.innerText = 'Uploading...';
-  const res = await fetch('/upload', { method: 'POST', body: form });
-  if (!res.ok) {
+  disableUiWhileProcessing(true);
+  resetProgress();
+  processingUrl = null;
+  processedVideo.removeAttribute('src');
+  processedVideo.load();
+
+  showOriginalPreview(file);
+
+  let res;
+  try {
+    res = await fetch('/upload', { method: 'POST', body: form });
+  } catch (err) {
     status.innerText = 'Upload failed';
+    disableUiWhileProcessing(false);
     return;
   }
+
+  if (!res.ok) {
+    status.innerText = 'Upload failed';
+    disableUiWhileProcessing(false);
+    return;
+  }
+
   const j = await res.json();
   uploadedFilename = j.filename;
-  originalVideo.src = j.url;
   status.innerText = 'Upload complete. Starting processing...';
   socket.emit('start_processing', { filename: uploadedFilename });
 });
 
-socket.on('processing_started', (d) => {
+socket.on('processing_started', (data) => {
+  processingUrl = data && data.processing_url ? data.processing_url : null;
   status.innerText = 'Processing started';
+  resetProgress();
 });
-socket.on('processing_progress', (d) => {
-  const p = d.percent || 0;
-  progressBar.style.width = p + '%';
-  percentText.innerText = p + '%';
+
+socket.on('processing_progress', (data) => {
+  const value = Number(data && data.percent ? data.percent : 0);
+  const clamped = Math.max(0, Math.min(100, Math.round(value)));
+  progressBar.style.width = `${clamped}%`;
+  percentText.innerText = `${clamped}%`;
 });
-socket.on('processing_done', (d) => {
-  status.innerText = 'Processing done';
-  if (d.output) {
-    const url = '/processed/' + d.output;
-    // ensure the file is available (server may still be finalizing)
-    fetch(url, { method: 'HEAD' }).then(res => {
-      if (res.ok) {
-        // create a source element with explicit type to help browsers
-        processedVideo.innerHTML = '';
-        const src = document.createElement('source');
-        src.src = url;
-        src.type = 'video/mp4';
-        processedVideo.appendChild(src);
-        processedVideo.load();
-      } else {
-        status.innerText = 'Processed file not yet available; try again in a few seconds.';
-      }
-    }).catch(err => {
-      status.innerText = 'Error fetching processed file: ' + err;
-    });
-  }
+
+socket.on('processing_done', (data) => {
+  progressBar.style.width = '100%';
+  percentText.innerText = '100%';
+  const url = data && data.output ? `/processed/${data.output}` : processingUrl;
+  loadProcessedVideo(url);
 });
-socket.on('processing_error', (d) => {
-  status.innerText = 'Error: ' + (d.error || 'unknown');
+
+socket.on('processing_error', (data) => {
+  status.innerText = `Error: ${data && data.error ? data.error : 'unknown'}`;
+  disableUiWhileProcessing(false);
+});
+
+socket.on('connect_error', () => {
+  status.innerText = 'Socket connection error. Please refresh the page.';
+  disableUiWhileProcessing(false);
 });

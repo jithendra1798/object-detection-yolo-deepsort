@@ -20,5 +20,11 @@ dev-install: install
 run: install
 	${PY} webapp.py
 
+docker-build:
+	docker build -t object-tracker:local .
+
+docker-run:
+	docker run --rm -p 5000:5000 -v $(pwd)/uploads:/app/uploads -v $(pwd)/processed:/app/processed --name object-tracker-local object-tracker:local
+
 clean:
 	rm -rf ${VENV} __pycache__ uploads processed

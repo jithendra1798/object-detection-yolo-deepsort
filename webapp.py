@@ -11,6 +11,13 @@ import random
 from ultralytics import YOLO
 from tracker import Tracker
 
+try:
+    import imageio.v2 as imageio
+    HAS_IMAGEIO = True
+except Exception:
+    imageio = None
+    HAS_IMAGEIO = False
+
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 OUT_DIR = os.path.join(BASE_DIR, 'processed')
@@ -30,8 +37,36 @@ DEMO_ORIGINALS = [
 # Files in processed/ that we must preserve (whitelisted demos)
 WHITELISTED_PROCESSED = {
     'proc_people.mp4',
+    'proc_people1.mp4',
     'proc_people2.mp4',
 }
+
+
+def is_browser_playable_mp4(path: str) -> bool:
+    """Best-effort check that the mp4 uses a browser-friendly codec (H.264/AVC)."""
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        cap.release()
+        return False
+    try:
+        fourcc = int(cap.get(cv2.CAP_PROP_FOURCC) or 0)
+        codec = ''.join(chr((fourcc >> (8 * i)) & 0xFF) for i in range(4)).strip().upper()
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0
+    finally:
+        cap.release()
+
+    if fps <= 0:
+        return False
+
+    if codec in {'AVC1', 'H264', 'X264'}:
+        return True
+    if codec in {'MP4V'}:
+        return True
+    if codec in {'FMP4', 'DIVX', 'XVID', 'MJPG', 'WMV1', 'WMV2'}:
+        return False
+
+    # Treat unknown codecs as non-browser-friendly to force regeneration.
+    return False
 
 
 def cleanup_old_files(interval_seconds=3000, expire_seconds=3600):
@@ -70,11 +105,16 @@ def cleanup_old_files(interval_seconds=3000, expire_seconds=3600):
         time.sleep(interval_seconds)
 
 
-# Start the cleanup thread when the app starts
-@app.before_first_request
-def start_background_workers():
-    # cleanup thread: check every 50 minutes, expire after 1 hour
-    socketio.start_background_task(cleanup_old_files, 3000, 3600)
+# Start the cleanup thread immediately (daemon) to avoid relying on Flask request hooks.
+# Using a plain daemon thread is simpler and avoids "before_request" lifecycle issues when
+# running under different WSGI servers.
+try:
+    t = threading.Thread(target=cleanup_old_files, args=(3000, 3600), daemon=True)
+    t.start()
+    app.logger.info('Started cleanup daemon thread')
+except Exception:
+    # If thread start fails during import (rare), log and continue; it'll be started on run.
+    app.logger.exception('Failed to start cleanup thread at import time')
 
 
 def ensure_demo_processed(original_path):
@@ -87,8 +127,16 @@ def ensure_demo_processed(original_path):
     proc_name = f'proc_{base}.mp4'
     proc_path = os.path.join(OUT_DIR, proc_name)
     if os.path.exists(proc_path) and os.path.getsize(proc_path) > 1024:
-        app.logger.info('Processed demo exists: %s', proc_path)
-        return proc_name
+        if is_browser_playable_mp4(proc_path):
+            app.logger.info('Processed demo exists: %s', proc_path)
+            return proc_name
+        # Remove incompatible processed demo so it can be regenerated with the new pipeline.
+        try:
+            os.remove(proc_path)
+            app.logger.warning('Removed incompatible demo output (codec) to regenerate: %s', proc_path)
+        except Exception:
+            app.logger.exception('Failed to remove incompatible demo output: %s', proc_path)
+            return proc_name
 
     # schedule background processing
     app.logger.info('Scheduling generation of demo processed video: %s -> %s', original_path, proc_path)
@@ -107,29 +155,60 @@ def process_video(input_path, output_path, sid=None):
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    # Try a list of codecs to maximize chance of producing a playable mp4
-    preferred_codecs = ['avc1', 'mp4v', 'H264', 'X264']
-    out = None
-    for codec in preferred_codecs:
+    if fps <= 1:
+        fps = 25.0
+
+    writer = None
+    writer_mode = None
+
+    if HAS_IMAGEIO:
         try:
-            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = imageio.get_writer(
+                output_path,
+                fps=fps,
+                codec='libx264',
+                format='FFMPEG',
+                pixelformat='yuv420p',
+                quality=8,
+                macro_block_size=None,
+            )
+            writer_mode = 'imageio'
+            app.logger.info('Using imageio-ffmpeg writer for %s', output_path)
+        except Exception as exc:
+            writer = None
+            app.logger.warning('Falling back to OpenCV writer for %s due to: %s', output_path, exc)
+
+    if writer is None:
+        preferred_codecs = ['avc1', 'H264', 'X264', 'mp4v']
+        for codec in preferred_codecs:
+            try:
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                tmp_out = cv2.VideoWriter(output_path, fourcc, fps, (frame.shape[1], frame.shape[0]))
+                if tmp_out.isOpened():
+                    writer = tmp_out
+                    writer_mode = 'opencv'
+                    app.logger.info('Opened OpenCV VideoWriter with codec %s for %s', codec, output_path)
+                    break
+                tmp_out.release()
+            except Exception:
+                continue
+
+    if writer is None:
+        # Final fallback: MP4V
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*'MP4V')
             tmp_out = cv2.VideoWriter(output_path, fourcc, fps, (frame.shape[1], frame.shape[0]))
             if tmp_out.isOpened():
-                out = tmp_out
-                app.logger.info('Opened VideoWriter with codec %s for %s', codec, output_path)
-                break
+                writer = tmp_out
+                writer_mode = 'opencv'
+                app.logger.warning('Using fallback MP4V codec for %s', output_path)
             else:
                 tmp_out.release()
         except Exception:
-            continue
+            pass
 
-    # Fallback: try MP4V by name
-    if out is None:
-        fourcc = cv2.VideoWriter_fourcc(*'MP4V')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (frame.shape[1], frame.shape[0]))
-
-    if not out or not out.isOpened():
-        app.logger.error('Failed to open VideoWriter for %s', output_path)
+    if writer is None:
+        app.logger.error('Failed to open any video writer for %s', output_path)
         if sid:
             socketio.emit('processing_error', {'error': 'failed to open video writer'}, to=sid)
         cap.release()
@@ -144,9 +223,14 @@ def process_video(input_path, output_path, sid=None):
     tracker = Tracker()
     colors = [(random.randint(0,255), random.randint(0,255), random.randint(0,255)) for _ in range(20)]
 
-    # count frames
+    # count frames; fall back to adaptive estimate when metadata is missing
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    approx_total_frames = total_frames if total_frames > 0 else 0
     processed = 0
+
+    if sid:
+        socketio.emit('processing_progress', {'percent': 0}, to=sid)
+        socketio.sleep(0)
 
     while ret:
         results = model(frame, device='cpu')
@@ -215,18 +299,31 @@ def process_video(input_path, output_path, sid=None):
                 cv2.rectangle(frame, (x1, y1 - int(txt_h*1.6)), (x1 + txt_w + 6, y1), colors[track_id % len(colors)], -1)
                 cv2.putText(frame, label, (x1+3, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 1, cv2.LINE_AA)
 
-        out.write(frame)
+        if writer_mode == 'imageio':
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            writer.append_data(rgb_frame)
+        else:
+            writer.write(frame)
         processed += 1
-        # emit progress
-        if sid and total_frames>0:
-            percent = int(processed * 100 / total_frames)
+        # emit progress updates (fallback to adaptive estimate when frame count unavailable)
+        if sid:
+            if total_frames > 0:
+                percent = int(processed * 100 / total_frames)
+            else:
+                approx_total_frames = max(approx_total_frames, processed + 5)
+                percent = min(99, int(processed * 100 / approx_total_frames))
             socketio.emit('processing_progress', {'percent': percent}, to=sid)
+
+        socketio.sleep(0)
 
         # read next
         ret, frame = cap.read()
 
     cap.release()
-    out.release()
+    if writer_mode == 'imageio':
+        writer.close()
+    else:
+        writer.release()
 
     # Verify output file exists and has non-trivial size
     try:
@@ -246,6 +343,7 @@ def process_video(input_path, output_path, sid=None):
         return
 
     if sid:
+        socketio.emit('processing_progress', {'percent': 100}, to=sid)
         socketio.emit('processing_done', {'output': os.path.basename(output_path)}, to=sid)
 
 
@@ -260,13 +358,19 @@ def demos():
     pairs = []
     for i, orig in enumerate(DEMO_ORIGINALS):
         proc_basename = ensure_demo_processed(orig)
-        proc_url = f'/processed/{proc_basename}'
-        # fallback to out/out2 if processed not yet available
-        if not os.path.exists(os.path.join(OUT_DIR, proc_basename)):
+        target_url = f'/processed/{proc_basename}'
+        processed_path = os.path.join(OUT_DIR, proc_basename)
+        if os.path.exists(processed_path):
+            initial_url = target_url
+        else:
             fallback = f'/out{"" if i==0 else "2"}.mp4'
-            proc_url = fallback
+            initial_url = fallback
         orig_url = f'/data/{os.path.basename(orig)}'
-        pairs.append({'original': orig_url, 'processed': proc_url})
+        pairs.append({
+            'original': orig_url,
+            'processed_initial': initial_url,
+            'processed_target': target_url,
+        })
     return render_template('demos.html', pairs=pairs)
 
 

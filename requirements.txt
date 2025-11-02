@@ -1,7 +1,12 @@
 flask
 flask-socketio
 eventlet
+gunicorn
 opencv-python
 ultralytics
 torch
 numpy
+tensorflow
+scipy
+imageio
+imageio-ffmpeg
