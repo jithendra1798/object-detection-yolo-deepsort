@@ -6,6 +6,7 @@ This project implements people detection and tracking using DeepSORT and YOLO mo
 <a href="https://objtrackapp60791.azurewebsites.net/demos" style="background:#0366d6;color:white;padding:6px 12px;text-decoration:none;border-radius:4px;">
   Open Demos
 </a>
+[![Open Demos](https://img.shields.io/badge/Open%20Demos-0366d6?style=for-the-badge)](https://objtrackapp60791.azurewebsites.net/demos)
 
 - Demos page: [https://objtrackapp60791.azurewebsites.net/demos](https://objtrackapp60791.azurewebsites.net/demos)
 - App: [https://objtrackapp60791.azurewebsites.net/](https://objtrackapp60791.azurewebsites.net/)
