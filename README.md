@@ -5,12 +5,14 @@ This project implements people detection and tracking using DeepSORT and YOLO mo
 ## Demo Videos Processed
 
 <p align="center">
+  <span>Demo 1</span>
+</p>
+<p align="center">
   <img src="demo/people1.gif" alt="demo 1" width="45%" />
   <img src="demo/proc_people1.gif" alt="demo 2" width="45%" />
 </p>
 <p align="center">
-  <span>People video 2</span>
-  <span>Processed people video 2</span>
+  <span>Demo 2</span>
 </p>
 <p align="center">
   <img src="demo/people2.gif" alt="demo 3" width="45%" />
