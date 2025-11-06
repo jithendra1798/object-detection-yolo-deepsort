@@ -2,6 +2,18 @@
 
 This project implements people detection and tracking using DeepSORT and YOLO models. It is designed to process video files, detect people, and track their movements across frames, outputting annotated videos and tracking results.
 
+## Demo Videos Processed
+
+<p align="center">
+  <img src="demo/proc_people1.gif" alt="demo 1" width="45%" />
+  <img src="demo/proc_people1.gif" alt="demo 2" width="45%" />
+</p>
+<p align="center">
+  <img src="demo/proc_people2.gif" alt="demo 3" width="45%" />
+  <img src="demo/proc_people2.gif" alt="demo 4" width="45%" />
+</p>
+
+
 ## [![Click to Open Demos](https://img.shields.io/badge/Click%20to%20Open%20Demos-0366d6?style=for-the-badge)](https://objtrackapp60791.azurewebsites.net/demos)
 
 - Demos page: [https://objtrackapp60791.azurewebsites.net/demos](https://objtrackapp60791.azurewebsites.net/demos)
